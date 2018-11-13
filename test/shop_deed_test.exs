@@ -6,6 +6,9 @@ defmodule ShopDeedTest do
   end
 
   test "properly decodes a deck from a string" do
+    ShopDeed.DecodingDeck.changeset(
+      "ADCJWYAIH1IJbwBoQEIeF0CIt0BCwMGAUcDAVcGAR8GHwYBCgEcNgEBBQ4QC0IvARY_"
+    )
   end
 
   # prop decode(encode(deck)) == deck
