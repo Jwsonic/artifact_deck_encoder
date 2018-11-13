@@ -1,6 +1,6 @@
 defmodule ShopDeed.DecodingDeck do
   use Ecto.Schema
-  use Bitwise, only_operators: true
+  use Bitwise
 
   import Ecto.Changeset
 
@@ -10,15 +10,13 @@ defmodule ShopDeed.DecodingDeck do
 
   @primary_key false
   embedded_schema do
-    field(:bytes, :binary)
-    field(:total_bytes, :integer)
-    field(:version_and_heroes_byte, :binary)
-    field(:version, :integer)
-    field(:hero_count, :integer)
-    field(:checksum, :integer)
-    field(:card_bytes, :binary)
     field(:name, :string)
-    field(:prefix, :string)
+
+    field(:version, :integer, virtual: true)
+    field(:hero_count, :integer, virtual: true)
+    field(:checksum, :integer, virtual: true)
+    field(:card_bytes, :binary, virtual: true)
+    field(:prefix, :string, virtual: true)
   end
 
   def changeset(bytes) do
@@ -67,7 +65,7 @@ defmodule ShopDeed.DecodingDeck do
     |> put_change(:version, version)
     |> put_change(:hero_count, hero_count)
     |> put_change(:checksum, checksum)
-    |> put_change(:card_bytes, card_bytes)
+    |> put_change(:card_bytes, :binary.bin_to_list(card_bytes))
     |> put_change(:name, name_bytes)
   end
 
@@ -80,7 +78,7 @@ defmodule ShopDeed.DecodingDeck do
            valid?: true
          } = changeset
        ) do
-    computed_checksum = card_bytes |> :binary.bin_to_list() |> Enum.sum() &&& 0xFF
+    computed_checksum = Enum.sum(card_bytes) &&& 0xFF
 
     case computed_checksum != checksum do
       true -> add_error(changeset, :bytes, "Checksum mistach #{checksum} != #{computed_checksum}")
@@ -93,39 +91,25 @@ defmodule ShopDeed.DecodingDeck do
            changes: %{hero_count: hero_count, card_bytes: card_bytes}
          } = changeset
        ) do
-    read_cards(card_bytes, hero_count) |> IO.inspect()
+    # {heroes, left_over_bytes} = read_cards(card_bytes, hero_count)
 
-    changeset
+    {left_over_bytes, _carry, heroes} =
+      Enum.reduce(0..(hero_count - 1), {card_bytes, 0, []}, fn _i, {bytes, carry, cards} ->
+        {card, rest} = read_card(bytes, carry)
+
+        {rest, card.id, cards ++ [card]}
+      end)
+
+    changeset |> put_change(:heroes, heroes) |> put_change(:card_bytes, left_over_bytes)
   end
 
-  defp read_encoded_32(<<chunk::8, rest::binary>>, num_bits) do
-    chunk |> read_chunk(num_bits) |> read_encoded_32(rest, 7, num_bits)
-  end
-
-  defp read_encoded_32({false, result}, rest, num_bits, _shift) when num_bits != 0 do
-    {result, rest}
-  end
-
-  defp read_encoded_32({_continue, result}, <<chunk::8, rest::binary>>, num_bits, shift) do
-    chunk |> read_chunk(num_bits, shift, result) |> read_encoded_32(rest, 7, shift + 7)
-  end
-
-  # Reads num_bits from bytes into out_bits, offset by the shift.
-  defp read_chunk(bytes, num_bits, shift \\ 0, out_bits \\ 0) do
-    continue_bit = 1 <<< num_bits
-    # Wipe out all bits that don't concern us
-    new_bits = bytes &&& continue_bit - 1
-
-    # Prepend the newly read bits
-    out_bits = out_bits ||| new_bits <<< shift
-    continue = (bytes &&& continue_bit) != 0
-
-    {continue, out_bits}
-  end
+  defp read_cards(bytes), do: read_cards(bytes, 0, [])
 
   defp read_cards(bytes, count), do: read_cards(bytes, count, 0, [])
 
-  defp read_cards(_bytes, count, _carry, cards) when count == 0, do: cards
+  defp read_cards([], _carry, cards), do: {cards, []}
+
+  defp read_cards(bytes, count, _carry, cards) when count == 0, do: {cards, bytes}
 
   # TODO: Implement with counts > 3
   # defp read_cards(
@@ -158,8 +142,10 @@ defmodule ShopDeed.DecodingDeck do
          carry,
          cards
        ) do
-    <<card_count::2, _::binary>> = bytes
-    {id_info, rest} = read_encoded_32(bytes, 5) |> IO.inspect()
+    card_count = bytes |> List.first() |> (&bsr(&1, 6)).()
+
+    {id_info, rest} = read_encoded_32(bytes, 5)
+
     id = id_info + carry
 
     new_cards =
@@ -172,5 +158,43 @@ defmodule ShopDeed.DecodingDeck do
         ]
 
     read_cards(rest, count - 1, id, new_cards)
+  end
+
+  defp read_card([header | _rest] = bytes, carry) do
+    {id_info, rest} = read_encoded_32(bytes, 5)
+
+    card_count = (header >>> 6) + 1
+
+    card = %{
+      id: id_info + carry,
+      count: card_count
+    }
+
+    {card, rest}
+  end
+
+  defp read_encoded_32([chunk | rest], num_bits) do
+    chunk |> read_chunk(num_bits) |> read_encoded_32(rest, 7, num_bits)
+  end
+
+  defp read_encoded_32({false, result}, rest, num_bits, _shift) when num_bits != 0 do
+    {result, rest}
+  end
+
+  defp read_encoded_32({_continue, result}, [chunk | rest], num_bits, shift) do
+    chunk |> read_chunk(num_bits, shift, result) |> read_encoded_32(rest, 7, shift + 7)
+  end
+
+  # Reads num_bits from bytes into out_bits, offset by the shift.
+  defp read_chunk(bytes, num_bits, shift \\ 0, out_bits \\ 0) do
+    continue_bit = 1 <<< num_bits
+    # Wipe out all bits that don't concern us
+    new_bits = bytes &&& continue_bit - 1
+
+    # Prepend the newly read bits
+    out_bits = out_bits ||| new_bits <<< shift
+    continue = (bytes &&& continue_bit) != 0
+
+    {continue, out_bits}
   end
 end
