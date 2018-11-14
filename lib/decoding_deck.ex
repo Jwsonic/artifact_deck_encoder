@@ -1,4 +1,4 @@
-defmodule ShopDeed.DecodingDeck do
+defmodule ShopDeed.Decoder do
   use Ecto.Schema
   use Bitwise
 
@@ -11,24 +11,28 @@ defmodule ShopDeed.DecodingDeck do
   @primary_key false
   embedded_schema do
     field(:name, :string)
+    field(:cards, {:array, :map})
+    field(:heroes, {:array, :map})
 
-    field(:version, :integer, virtual: true)
-    field(:hero_count, :integer, virtual: true)
-    field(:checksum, :integer, virtual: true)
-    field(:card_bytes, :binary, virtual: true)
-    field(:prefix, :string, virtual: true)
+    field(:version, :integer)
+    field(:hero_count, :integer)
+    field(:checksum, :integer)
+    field(:card_bytes, :binary)
+    field(:prefix, :string)
   end
 
-  def changeset(bytes) do
-    %DecodingDeck{}
+  def decoder(bytes) do
+    %Decoder{}
     |> cast(%{}, [])
     |> validate_prefix(bytes)
     |> clean_and_decode_bytes()
     |> split_bytes()
     |> validate_number(:version, equal_to: Constants.version())
     |> validate_number(:hero_count, greater_than: 0, less_than_or_equal_to: 5)
-    |> validate_checksum()
+    |> validate_confirmation(:checksum, message: "Checksum does not match")
     |> decode_heroes()
+    |> decode_cards()
+    |> apply_action(:insert)
   end
 
   defp validate_prefix(changeset, <<prefix::bytes-size(3)>> <> rest = bytes) do
@@ -54,6 +58,8 @@ defmodule ShopDeed.DecodingDeck do
     end
   end
 
+  defp split_bytes({%Ecto.Changeset{valid?: false} = changeset, _bytes}), do: changeset
+
   defp split_bytes(
          {changeset,
           <<version::4, _::1, hero_count::3, checksum::integer, name_length::integer>> <> rest}
@@ -61,113 +67,68 @@ defmodule ShopDeed.DecodingDeck do
     card_bytes_length = byte_size(rest) - name_length
     <<card_bytes::bytes-size(card_bytes_length)>> <> name_bytes = rest
 
+    card_bytes = :binary.bin_to_list(card_bytes)
+    checksum_confirmation = Enum.sum(card_bytes) &&& 0xFF
+
     changeset
     |> put_change(:version, version)
     |> put_change(:hero_count, hero_count)
     |> put_change(:checksum, checksum)
-    |> put_change(:card_bytes, :binary.bin_to_list(card_bytes))
+    |> put_change(:checksum_confirmation, checksum_confirmation)
+    |> put_change(:card_bytes, card_bytes)
     |> put_change(:name, name_bytes)
   end
 
-  defp validate_checksum(
-         %Ecto.Changeset{
-           changes: %{
-             checksum: checksum,
-             card_bytes: card_bytes
-           },
-           valid?: true
-         } = changeset
-       ) do
-    computed_checksum = Enum.sum(card_bytes) &&& 0xFF
-
-    case computed_checksum != checksum do
-      true -> add_error(changeset, :bytes, "Checksum mistach #{checksum} != #{computed_checksum}")
-      _ -> changeset
-    end
-  end
+  defp decode_heroes(%Ecto.Changeset{valid?: false} = changeset), do: changeset
 
   defp decode_heroes(
          %Ecto.Changeset{
            changes: %{hero_count: hero_count, card_bytes: card_bytes}
          } = changeset
        ) do
-    # {heroes, left_over_bytes} = read_cards(card_bytes, hero_count)
-
-    {left_over_bytes, _carry, heroes} =
-      Enum.reduce(0..(hero_count - 1), {card_bytes, 0, []}, fn _i, {bytes, carry, cards} ->
-        {card, rest} = read_card(bytes, carry)
-
-        {rest, card.id, cards ++ [card]}
-      end)
+    {heroes, left_over_bytes} = read_heroes(card_bytes, hero_count)
 
     changeset |> put_change(:heroes, heroes) |> put_change(:card_bytes, left_over_bytes)
   end
 
+  defp decode_cards(%Ecto.Changeset{valid?: false} = changeset), do: changeset
+
+  defp decode_cards(
+         %Ecto.Changeset{
+           changes: %{card_bytes: card_bytes}
+         } = changeset
+       ) do
+    cards = read_cards(card_bytes)
+
+    put_change(changeset, :cards, cards)
+  end
+
+  defp read_heroes(bytes, count), do: read_heroes(bytes, count, 0, [])
+
+  defp read_heroes(bytes, 0, _carry, cards), do: {cards, bytes}
+
+  defp read_heroes(bytes, count, carry, heroes) do
+    {hero, rest} = read_card(bytes, carry)
+
+    read_heroes(rest, count - 1, hero.id, heroes ++ [hero])
+  end
+
   defp read_cards(bytes), do: read_cards(bytes, 0, [])
 
-  defp read_cards(bytes, count), do: read_cards(bytes, count, 0, [])
+  defp read_cards([], _carry, cards), do: cards
 
-  defp read_cards([], _carry, cards), do: {cards, []}
+  defp read_cards(bytes, carry, cards) do
+    {card, rest} = read_card(bytes, carry)
 
-  defp read_cards(bytes, count, _carry, cards) when count == 0, do: {cards, bytes}
-
-  # TODO: Implement with counts > 3
-  # defp read_cards(
-  #        <<card_count::2, _::1, id_info::5, rest::binary>>,
-  #        count,
-  #        carry,
-  #        cards
-  #      )
-  #      when card_count == 3 do
-  #   IO.inspect("Overflow on count #{count}")
-  #   {id_info, rest} = read_encoded_32({true, id_info}, rest, 7, 5)
-  #   id = id_info + carry
-  #   new_count = count - 1
-
-  #   new_cards =
-  #     cards ++
-  #       [
-  #         %{
-  #           id: id,
-  #           count: card_count + 1
-  #         }
-  #       ]
-
-  #   read_cards(rest, new_count, id, new_cards)
-  # end
-
-  defp read_cards(
-         bytes,
-         count,
-         carry,
-         cards
-       ) do
-    card_count = bytes |> List.first() |> (&bsr(&1, 6)).()
-
-    {id_info, rest} = read_encoded_32(bytes, 5)
-
-    id = id_info + carry
-
-    new_cards =
-      cards ++
-        [
-          %{
-            id: id,
-            count: card_count + 1
-          }
-        ]
-
-    read_cards(rest, count - 1, id, new_cards)
+    read_cards(rest, card.id, cards ++ [card])
   end
 
   defp read_card([header | _rest] = bytes, carry) do
     {id_info, rest} = read_encoded_32(bytes, 5)
 
-    card_count = (header >>> 6) + 1
-
     card = %{
       id: id_info + carry,
-      count: card_count
+      count: (header >>> 6) + 1
     }
 
     {card, rest}
