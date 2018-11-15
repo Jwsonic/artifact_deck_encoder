@@ -4,7 +4,7 @@ defmodule ShopDeed.Decoder do
 
   import Ecto.Changeset
 
-  alias ShopDeed.Constants
+  alias ShopDeed.{Card, Constants, Deck, Hero}
 
   alias __MODULE__
 
@@ -21,10 +21,10 @@ defmodule ShopDeed.Decoder do
     field(:prefix, :string)
   end
 
-  def decoder(bytes) do
+  def decode(deck_string) do
     %Decoder{}
     |> cast(%{}, [])
-    |> validate_prefix(bytes)
+    |> validate_prefix(deck_string)
     |> clean_and_decode_bytes()
     |> split_bytes()
     |> validate_number(:version, equal_to: Constants.version())
@@ -33,6 +33,7 @@ defmodule ShopDeed.Decoder do
     |> decode_heroes()
     |> decode_cards()
     |> apply_action(:insert)
+    |> process_result()
   end
 
   defp validate_prefix(changeset, <<prefix::bytes-size(3)>> <> rest = bytes) do
@@ -103,14 +104,20 @@ defmodule ShopDeed.Decoder do
     put_change(changeset, :cards, cards)
   end
 
+  defp process_result({:error, _stuff}), do: {:error, "Deck go boom"}
+
+  defp process_result({:ok, %Decoder{name: name, heroes: heroes, cards: cards}}) do
+    {:ok, %Deck{name: name, heroes: heroes, cards: cards}}
+  end
+
   defp read_heroes(bytes, count), do: read_heroes(bytes, count, 0, [])
 
   defp read_heroes(bytes, 0, _carry, cards), do: {cards, bytes}
 
   defp read_heroes(bytes, count, carry, heroes) do
-    {hero, rest} = read_card(bytes, carry)
+    {%Card{count: turn, id: id}, rest} = read_card(bytes, carry)
 
-    read_heroes(rest, count - 1, hero.id, heroes ++ [hero])
+    read_heroes(rest, count - 1, id, heroes ++ [%Hero{turn: turn, id: id}])
   end
 
   defp read_cards(bytes), do: read_cards(bytes, 0, [])
@@ -126,12 +133,10 @@ defmodule ShopDeed.Decoder do
   defp read_card([header | _rest] = bytes, carry) do
     {id_info, rest} = read_encoded_32(bytes, 5)
 
-    card = %{
-      id: id_info + carry,
-      count: (header >>> 6) + 1
-    }
-
-    {card, rest}
+    {%Card{
+       id: id_info + carry,
+       count: (header >>> 6) + 1
+     }, rest}
   end
 
   defp read_encoded_32([chunk | rest], num_bits) do

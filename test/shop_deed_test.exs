@@ -2,13 +2,19 @@ defmodule ShopDeedTest do
   use ExUnit.Case
   doctest ShopDeed
 
+  @g_b_deck "ADCJWkTZX05uwGDCRV4XQGy3QGLmqUBg4GQJgGLGgO7AaABR3JlZW4vQmxhY2sgRXhhbXBsZQ__"
+  @u_r_g_deck "ADCJWYAIH1IJbwBoQEIeF0CIt0BCwMGAUcDAVcGAR8GHwYBCgEcNgEBBQ4QC0IvARY_"
+
   test "properly enocdes a deck into a string" do
   end
 
   test "properly decodes a deck from a string" do
-    ShopDeed.DecodingDeck.changeset(
-      "ADCJWYAIH1IJbwBoQEIeF0CIt0BCwMGAUcDAVcGAR8GHwYBCgEcNgEBBQ4QC0IvARY_"
-    )
+    ShopDeed.decode(@u_r_g_deck)
+  end
+
+  test "encoded value equals decoded value" do
+    {:ok, deck} = ShopDeed.decode(@u_r_g_deck)
+    assert ShopDeed.encode(deck) == {:ok, @u_r_g_deck}
   end
 
   # prop decode(encode(deck)) == deck
