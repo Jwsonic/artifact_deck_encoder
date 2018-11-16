@@ -3,40 +3,15 @@ defmodule ShopDeed do
   Documentation for ShopDeed.
   """
 
-  alias ShopDeed.{Deck, Decoder}
+  alias ShopDeed.{Deck, Decoder, DecodeError, Encoder, EncodeError}
 
   @doc """
-  Returns the given deck as a base64 encoded string compatable with playartifact.com's deck viewer.
-
-  ## Examples
-
-      iex> ShopDeed.encode(%ShopDeed.Deck{heroes: [], cards: [], name: "Green/Black Example"})
-      ""
-
-  """
-  def encode(%Deck{} = _deck) do
-    # Encode name
-    # Encode heroes
-    # Encode cards
-
-    # name = clean_name(name)
-
-    # <<>>
-    # |> encode_hero_count(heroes)
-    # |> encode_name_len(name)
-    # |> encode_remaining_hero_count(3, heroes)
-    # |> encode_heroes(heroes)
-
-    ""
-  end
-
-  @doc """
-  Returns the base64 encoded as a Deck.
+  Returns the base64 encoded string as a Deck or a DecodeError.
 
   ## Examples
 
       iex> ShopDeed.decode("JWkTZX05uwGDCRV4XQGy3QGLmqUBg4GQJgGLGgO7AaABR3JlZW4vQmxhY2sgRXhhbXBsZQ__")
-      {:error, "Missing required prefix: \"ADC\""}
+      {:error, %ShopDeed.DecodeError{message: "Must start with prefix: 'ADC'"}}
 
       iex> ShopDeed.decode("ADCJWkTZX05uwGDCRV4XQGy3QGLmqUBg4GQJgGLGgO7AaABR3JlZW4vQmxhY2sgRXhhbXBsZQ__")
       {:ok, %ShopDeed.Deck{cards: [
@@ -65,5 +40,34 @@ defmodule ShopDeed do
           ],
           name: "Green/Black Example"}}
   """
+  @spec decode(String.t()) :: {:ok, ShopDeed.Deck.t()} | {:error, DecodeError.t()}
   def decode(deck_string), do: Decoder.decode(deck_string)
+
+  @spec decode!(String.t()) :: ShopDeed.Deck.t()
+  def decode!(deck_string) do
+    case decode(deck_string) do
+      {:ok, deck} -> deck
+      {:error, error} -> raise error
+    end
+  end
+
+  @doc """
+  Returns the given deck as a base64 encoded string compatable with playartifact.com's deck viewer.
+
+  ## Examples
+
+      iex> ShopDeed.encode(%ShopDeed.Deck{heroes: [], cards: [], name: "Green/Black Example"})
+      ""
+
+  """
+  @spec encode(ShopDeed.Deck.t()) :: {:ok, String.t()} | {:error, EncodeError.t()}
+  def encode(deck), do: Encoder.encode(deck)
+
+  @spec encode!(Deck.t()) :: String.t()
+  def encode!(deck) do
+    case encode(deck) do
+      {:ok, deck_string} -> deck_string
+      {:error, error} -> raise error
+    end
+  end
 end

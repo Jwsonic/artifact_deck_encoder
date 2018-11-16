@@ -13,8 +13,8 @@ defmodule ShopDeedTest do
   end
 
   test "encoded value equals decoded value" do
-    {:ok, deck} = ShopDeed.decode(@u_r_g_deck)
-    assert ShopDeed.encode(deck) == {:ok, @u_r_g_deck}
+    assert @u_r_g_deck |> ShopDeed.decode!() |> ShopDeed.decode!() == @u_r_g_deck
+    assert @g_b_deck |> ShopDeed.decode!() |> ShopDeed.decode!() == @g_b_deck
   end
 
   # prop decode(encode(deck)) == deck
