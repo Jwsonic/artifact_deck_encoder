@@ -1,10 +1,18 @@
+defmodule ShopDeed.DecodeError do
+  @type t :: %__MODULE__{message: String.t()}
+
+  defexception [:message]
+
+  def message(%{message: message}), do: message
+end
+
 defmodule ShopDeed.Decoder do
   use Ecto.Schema
   use Bitwise
 
   import Ecto.Changeset
 
-  alias ShopDeed.{Card, Constants, Deck, Hero}
+  alias ShopDeed.{Card, Constants, Deck, DecodeError, Hero}
 
   alias __MODULE__
 
@@ -19,6 +27,16 @@ defmodule ShopDeed.Decoder do
     field(:checksum, :integer)
     field(:card_bytes, :binary)
     field(:prefix, :string)
+  end
+
+  def decode2(deck_string) do
+    with {:ok, bytes} <- validate_prefix(Constants.prefix(), deck_string),
+         cleaned_bytes <- clean_bytes(bytes),
+         {:ok, decoded_bytes} <- Base.decode64(cleaned_bytes) do
+      decoded_bytes
+    else
+      {:error, message} -> %DecodeError{message: message}
+    end
   end
 
   def decode(deck_string) do
@@ -36,6 +54,15 @@ defmodule ShopDeed.Decoder do
     |> process_result()
   end
 
+  defp validate_prefix(expected_prefix, <<prefix::bytes-size(3)>> <> rest)
+       when prefix == expected_prefix do
+    {:ok, rest}
+  end
+
+  defp validate_prefix(expected_prefix, _bytes) do
+    {:error, "Must start with prefix '#{expected_prefix}'"}
+  end
+
   defp validate_prefix(changeset, <<prefix::bytes-size(3)>> <> rest = bytes) do
     case prefix == Constants.prefix() do
       true ->
@@ -44,6 +71,12 @@ defmodule ShopDeed.Decoder do
       _ ->
         {add_error(changeset, :prefix, "Must start with prefix '#{Constants.prefix()}'"), bytes}
     end
+  end
+
+  defp clean_bytes(bytes) do
+    bytes
+    |> String.replace("-", "/")
+    |> String.replace("_", "=")
   end
 
   defp clean_and_decode_bytes({changeset, bytes}) do
