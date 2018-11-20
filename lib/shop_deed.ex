@@ -11,7 +11,7 @@ defmodule ShopDeed do
   ## Examples
 
       iex> ShopDeed.decode("JWkTZX05uwGDCRV4XQGy3QGLmqUBg4GQJgGLGgO7AaABR3JlZW4vQmxhY2sgRXhhbXBsZQ__")
-      {:error, %ShopDeed.DecodeError{message: "Must start with prefix: 'ADC'"}}
+      {:error, %ShopDeed.DecodeError{message: "Must start with prefix 'ADC'"}}
 
       iex> ShopDeed.decode("ADCJWkTZX05uwGDCRV4XQGy3QGLmqUBg4GQJgGLGgO7AaABR3JlZW4vQmxhY2sgRXhhbXBsZQ__")
       {:ok, %ShopDeed.Deck{cards: [
